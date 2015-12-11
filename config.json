@@ -1,0 +1,13 @@
+{
+    "port": 1337,
+    "bouncers": [
+        {
+            "id": "ionut",
+            "nick": "zzzzz",
+            "user": "pwnro",
+            "server": "irc.rizon.net",
+            "port": 6667,
+            "channels": ["#chanon"]
+        }
+    ]
+}
