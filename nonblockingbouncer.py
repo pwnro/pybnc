@@ -20,7 +20,7 @@ class Bouncer(object):
     def send(self, data):
         try:
             payload = data.encode('utf-8')
-            ##print(">> %s" % payload)
+            #print(">> %s" % payload)
             self.sock.send(data.encode('utf-8') + "\n")
         except:
             sys.exit("can't send()")
@@ -41,7 +41,7 @@ class Bouncer(object):
             
         print("connection ok..")
         
-        self.select_loop()
+        self.loop()
                 
     def disconnect(self):
         if self.sock != False:
@@ -55,19 +55,8 @@ class Bouncer(object):
         while True:
             r, w, e = select.select(is_readable, is_writable, is_error, 0)
             
-            for sock in r:
-                if sock == self.sock:
-                    # incoming message from ircd
-                    received = sock.recv(2048)
-                    
-                    if not received:
-                        sys.exit("disconnected from server")
-                    else:
-                        lines = received.encode('utf-8').split("\n")
-                        lines = filter(None, lines)
-                        
-                        for line in lines:
-                            self.parse(line.strip())           
+            
+    
             
     def loop(self):
         buff = ''

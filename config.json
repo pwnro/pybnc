@@ -1,5 +1,8 @@
 {
-    "port": 1337,
+    "server": {
+        "port": 1337,
+        "host": "localhost"
+    },
     "bouncers": [
         {
             "id": "ionut",
@@ -7,7 +10,7 @@
             "user": "pwnro",
             "server": "irc.rizon.net",
             "port": 6667,
-            "channels": ["#chanon"]
+            "channels": ["#pwn.ro"]
         }
     ]
 }
