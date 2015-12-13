@@ -4,7 +4,7 @@ import string as str
 from random import randint
 import select
 
-class Bouncer(object):
+class IrcClient(object):
     sock = False
     registered = False
     
@@ -34,6 +34,8 @@ class Bouncer(object):
             
             #self.sock.setblocking(False)
             
+            self.config['peername'] = self.sock.getpeername()
+            
             self.send("USER %s %s %s :pybnc" % (self.config['id'], '+iw', self.config['nick']))
             self.send("NICK %s" % self.config['nick']) # here we actually assign the nick to the bot
         except:
@@ -41,7 +43,8 @@ class Bouncer(object):
             
         print("connection ok..")
         
-        self.select_loop()
+        #return self.sock
+        #self.select_loop()
                 
     def disconnect(self):
         if self.sock != False:
@@ -49,25 +52,31 @@ class Bouncer(object):
             
     def select_loop(self):
         is_readable = [ self.sock ]
-        is_writable = []
+        is_writable = [ self.sock ]
         is_error = []
         
         while True:
-            r, w, e = select.select(is_readable, is_writable, is_error, 0)
-            
-            for sock in r:
-                if sock == self.sock:
-                    # incoming message from ircd
-                    received = sock.recv(2048)
-                    
-                    if not received:
-                        sys.exit("disconnected from server")
-                    else:
-                        lines = received.encode('utf-8').split("\n")
-                        lines = filter(None, lines)
+            try:
+                r, w, e = select.select(is_readable, is_writable, is_error, 0)
+                
+                for sock in r:
+                    if sock == self.sock:
+                        # incoming message from ircd
+                        received = sock.recv(4096)
                         
-                        for line in lines:
-                            self.parse(line.strip())           
+                        if not received:
+                            sys.exit("disconnected from server")
+                        else:
+                            lines = received.encode('utf-8').split("\n")
+                            lines = filter(None, lines)
+                            
+                            for line in lines:
+                                self.parse(line.strip())
+                                
+            except KeyboardInterrupt:
+                print '!!!! interrupted.'
+                self.sock.close()
+                break            
             
     def loop(self):
         buff = ''
@@ -86,11 +95,12 @@ class Bouncer(object):
     def parse(self, line):
         #pprint("<< %s" % line)
         words = line.split(' ')
+        words_len = len(words)
         
-        if words[0].startswith(':'):
+        if words_len > 0 and words[0].startswith(':'):
             self.network = words[0][1:]
             
-        if words[1].isdigit():
+        if words_len > 1 and words[1].isdigit():
             irc_code = words[1]
             
             self.reply_to_code(irc_code)
