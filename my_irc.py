@@ -7,22 +7,51 @@ import select
 class IrcClient(object):
     sock = False
     registered = False
+    client_connected = False
+    client_sockets = []
     
     def __init__(self, config):
         print("starting bouncer..")
         self.config = config
-        
+        self.id = config['id']
         #self.connect()
         
     def get_config(self):
         return self.config
     
+    def send_to_client_sockets(self, data):
+        # data a fost decodata din bytes, primeste str, pentru trimitere encodam inapoi in bytes
+        if self.client_sockets != []:
+            data = data + "\n"
+            
+            print("************")
+            print(type(data))
+            print('%s' % data)
+            print("************")
+            
+            #payload = bytes(data, 'UTF-8') -> trimite sub forma bytes pyton b'...
+            payload = bytes(data, 'UTF-8')
+            
+            for client_socket in self.client_sockets:
+                try:
+                    client_socket.send(payload)
+                except:
+                    print("could not send data read from ircd to client")
+                    # remove client_socket from list
+                    self.client_sockets.remove(client_socket)
+    
     def send(self, data):
         try:
-            payload = data.encode('utf-8')
+            data = data + "\n"
+            data = bytes(data, 'UTF-8')
+            #payload = (str(data) + "\n").encode('utf-8')
             ##print(">> %s" % payload)
-            self.sock.send(data.encode('utf-8') + "\n")
-        except:
+            
+            payload = data
+            
+            self.sock.send(payload)
+        except Exception as e:
+            print(repr(e))
             sys.exit("can't send()")
     
     def connect(self):
@@ -38,7 +67,8 @@ class IrcClient(object):
             
             self.send("USER %s %s %s :pybnc" % (self.config['id'], '+iw', self.config['nick']))
             self.send("NICK %s" % self.config['nick']) # here we actually assign the nick to the bot
-        except:
+        except Exception as e:
+            print(repr(e))
             sys.exit("can't connect to server..")
             
         print("connection ok..")
@@ -68,13 +98,12 @@ class IrcClient(object):
                             sys.exit("disconnected from server")
                         else:
                             lines = received.encode('utf-8').split("\n")
-                            lines = filter(None, lines)
                             
                             for line in lines:
                                 self.parse(line.strip())
                                 
             except KeyboardInterrupt:
-                print '!!!! interrupted.'
+                print('!!!! interrupted.')
                 self.sock.close()
                 break            
             
@@ -85,7 +114,7 @@ class IrcClient(object):
             if received == '':
                 sys.exit("socket connection closed..")
             
-            lines = received.encode('utf-8').split("\n")
+            lines = str(received).encode('utf-8').split("\n")
             lines = filter(None, lines)
             
             for line in lines:
@@ -109,6 +138,9 @@ class IrcClient(object):
         if words[0].startswith('PING'):
             pong = words[1][1:]
             self.send("PONG :%s" % pong)
+            
+        if self.client_connected != False:
+            self.send_to_client_sockets(line)
             
     def getNick(self):
         return self.config['nick']

@@ -1,10 +1,11 @@
 import sys, os, json
 from pprint import pprint
 from my_irc import IrcClient
-from server import BncServer
+from bnc_server import BncServer
+from bnc_client import BncClient
 
 import select
-import time, thread
+#import time, thread
 
 if hasattr(os, 'geteuid') and os.getuid() == 0:
     sys.exit("can't run as root srry")
@@ -20,6 +21,8 @@ except:
 
 bouncers = []
 bouncer_sockets = []
+bnc_clients = []
+
 if 'bouncers' in cfg and len(cfg['bouncers']) > 0:
     # start bouncer server - listen for connections and map them to the bncs
     bcfgs = cfg['bouncers']
@@ -64,7 +67,16 @@ if 'server' in cfg:
 # main select() loop
 while True :
     try:
-        sel_read, sel_write, sel_error = select.select(is_readable, is_writable, is_error, 0)
+        sel_read, sel_write, sel_error = select.select(is_readable, is_writable, is_error)
+        
+        for sock in sel_error:
+            # remove from lists
+            print("select() error detected")
+            try:
+                is_readable.remove(sock)
+                is_writable.remove(sock)
+            except:
+                pass
         
         for sock in sel_read:
             # incoming message from ircd on one of the bouncers?
@@ -86,14 +98,26 @@ while True :
                 
                 if not received:
                     print(bouncer_id + ": disconnected from server")
+                    
+                    try:
+                        is_readable.remove(sock)
+                    except:
+                        pass
+                    
                     sock.close()
+                    # ar trebui scoasa din is_readable, is_writable
                 else:
-                    lines = received.encode('utf-8').split("\n")
+                    # primim bytes -> decode in utf8
+                    lines = received.decode('utf-8')
+                    
+                    lines = lines.split("\n")
+                    lines = list(map(lambda l: l.strip(), lines))
                     lines = filter(None, lines)
                     
                     for line in lines:
                         #print(bouncer_id + ": " + line)
                         bouncer.parse(line.strip())
+                        
                         
             elif sock == server.sock:
                 # new connection on server socket
@@ -101,8 +125,8 @@ while True :
                 print("server - new connection %d from %s" % (client.fileno(), address))
                 
                 # add client socket to sel_read and sel_write lists
-                sel_read.append(client)
-                sel_write.append(client)
+                is_readable.append(client)
+                is_writable.append(client)
             
             else:
                 # one of the bnc clients
@@ -110,19 +134,51 @@ while True :
                 
                 if not received:
                     print("bnc client disconnected")
+                    
+                    # remove from is_readable
+                    try:
+                        is_readable.remove(sock)
+                        is_writable.remove(sock)
+                    except:
+                        pass
+                    
                     sock.close()
                 else:
-                    lines = received.encode('utf-8').split("\n")
-                    lines = filter(None, lines)
+                    #lines = received.encode('utf-8').split("\n")
+                    lines = received.decode('utf-8').split("\n")
                     
                     for line in lines:
-                        print("bnc client: " + line)
+                        print(line.strip())
+                        words = line.split(' ')
+                        words_len = len(words)
                         
+                        if words_len > 1 and words[0] == 'USER':
+                            client_id = words[1]
+                            
+                            # check if we have a bouncer up for this id
+                            for bnc in bouncers:
+                                if hasattr(bnc, 'id') and bnc.id == client_id:
+                                    print("client connected to bouncer %s" % client_id)
+                                    break
+                                else:
+                                    bnc = False
+                                    
+                            if bnc == False:
+                                print("no bouncer with id %s found for client" % client_id)
+                            else:
+                                # connect client to bouncer
+                                print("connecting client to bouncer")
+                                bnc.client_connected = True
+                                bnc.client_sockets.append(sock)
+                                
+                                # sending la misto errnoues nickname
+                                sock.send(bytes(':irc.rizon.no 433 * zzzzz :Nickname is already in use.', 'UTF-8'))
+                                
         for sock in sel_write:
             pass
             
     except KeyboardInterrupt:
-        print 'got interrupt, closing sockets'
+        print('got interrupt, closing sockets')
         
         for sock in bouncer_sockets:
             sock.close()
