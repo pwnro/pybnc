@@ -22,34 +22,41 @@ class IrcClient(object):
     def send_to_client_sockets(self, data):
         # data a fost decodata din bytes, primeste str, pentru trimitere encodam inapoi in bytes
         if self.client_sockets != []:
-            data = data + "\n"
-            
-            print("************")
-            print(type(data))
-            print('%s' % data)
-            print("************")
-            
-            #payload = bytes(data, 'UTF-8') -> trimite sub forma bytes pyton b'...
-            payload = bytes(data, 'UTF-8')
+            #payload = bytes(data + "\n", 'UTF-8')
             
             for client_socket in self.client_sockets:
                 try:
-                    client_socket.send(payload)
+                    #client_socket.send(payload)
+                    self.send_to_socket(data, client_socket)
                 except:
                     print("could not send data read from ircd to client")
                     # remove client_socket from list
                     self.client_sockets.remove(client_socket)
     
-    def send(self, data):
+    def send_to_socket(self, data, socket):
+        self.send(data, socket)
+    
+    def send(self, data, to_client = False):
         try:
-            data = data + "\n"
-            data = bytes(data, 'UTF-8')
-            #payload = (str(data) + "\n").encode('utf-8')
-            ##print(">> %s" % payload)
+            if type(data) is str:
+                pass
+            elif type(data) is bytes:
+                data = data.decode('utf-8')
             
-            payload = data
+            if len(data) > 0 and data[-1] != "\n":
+                print("**********")
+                print(data)
+                print("**********")                
+                
+                data = data + "\n"
+                
+            data = data.encode('utf-8')
             
-            self.sock.send(payload)
+            if to_client == False:
+                self.sock.send(data)
+            else:
+                to_client.send(data)
+                
         except Exception as e:
             print(repr(e))
             sys.exit("can't send()")
@@ -79,47 +86,6 @@ class IrcClient(object):
     def disconnect(self):
         if self.sock != False:
             self.sock.close()
-            
-    def select_loop(self):
-        is_readable = [ self.sock ]
-        is_writable = [ self.sock ]
-        is_error = []
-        
-        while True:
-            try:
-                r, w, e = select.select(is_readable, is_writable, is_error, 0)
-                
-                for sock in r:
-                    if sock == self.sock:
-                        # incoming message from ircd
-                        received = sock.recv(4096)
-                        
-                        if not received:
-                            sys.exit("disconnected from server")
-                        else:
-                            lines = received.encode('utf-8').split("\n")
-                            
-                            for line in lines:
-                                self.parse(line.strip())
-                                
-            except KeyboardInterrupt:
-                print('!!!! interrupted.')
-                self.sock.close()
-                break            
-            
-    def loop(self):
-        buff = ''
-        while(True):
-            received = self.sock.recv(2048)
-            if received == '':
-                sys.exit("socket connection closed..")
-            
-            lines = str(received).encode('utf-8').split("\n")
-            lines = filter(None, lines)
-            
-            for line in lines:
-                line = line.strip()
-                self.parse(line)
                 
     def parse(self, line):
         #pprint("<< %s" % line)
@@ -154,9 +120,11 @@ class IrcClient(object):
         if code == "001" and self.registered == False:
             # registed on the network
             self.registered = True
-            
-            # join channels
-            for channel in self.config['channels']:
-                self.send("JOIN %s" % channel)
+                
+    def join_config_channels(self):        
+        # join channels
+        for channel in self.config['channels']:
+            self.send("JOIN %s" % channel)
+        
             
 

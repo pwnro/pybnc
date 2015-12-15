@@ -116,7 +116,7 @@ while True :
                     
                     for line in lines:
                         #print(bouncer_id + ": " + line)
-                        bouncer.parse(line.strip())
+                        bouncer.parse(line.strip()) # trimite automat de la ircd la clientul conectat la bnc
                         
                         
             elif sock == server.sock:
@@ -144,6 +144,13 @@ while True :
                     
                     sock.close()
                 else:
+                    # cautam sa vede daca avem deja bouncer pentru aceasta conexiune, sau daca conectam la unul
+                    bnc = False
+                    for bnc1 in bouncers:
+                        if sock in bnc1.client_sockets:
+                            bnc = bnc1
+                            continue
+                    
                     #lines = received.encode('utf-8').split("\n")
                     lines = received.decode('utf-8').split("\n")
                     
@@ -155,7 +162,6 @@ while True :
                         if words_len > 1 and words[0] == 'USER':
                             client_id = words[1]
                             
-                            # check if we have a bouncer up for this id
                             for bnc in bouncers:
                                 if hasattr(bnc, 'id') and bnc.id == client_id:
                                     print("client connected to bouncer %s" % client_id)
@@ -172,7 +178,32 @@ while True :
                                 bnc.client_sockets.append(sock)
                                 
                                 # sending la misto errnoues nickname
-                                sock.send(bytes(':irc.rizon.no 433 * zzzzz :Nickname is already in use.', 'UTF-8'))
+                                # sock.send(bytes(':irc.rizon.no 433 * zzzzz :Nickname is already in use.', 'UTF-8'))
+                                
+                                #sock.send(bytes(":pyBNC 001 * sal man experienta placuta ms\n", 'UTF-8'))
+                                #sock.send(bytes(":pyBNC 002 * te-ai conectat la pybnc versiunea 1.3.3.7\n", 'UTF-8'))
+                                
+                                bnc.send_to_socket(":pyBNC 001 %s :welcome to pyBNC" % bnc.getNick(), sock)
+                                bnc.send_to_socket(":pyBNC 002 %s :running pyBNC version 1.3.37" % bnc.getNick(), sock)
+                                
+                                #bnc.join_config_channels()
+                                
+                        # intercept QUIT command from client
+                        elif words_len > 0 and words[0] == 'QUIT':
+                            print("bnc client disconnected, intercepting QUIT")
+                            
+                            try:
+                                is_readable.remove(sock)
+                                is_writable.remove(sock)
+                            except:
+                                pass                            
+                            
+                            sock.close()
+                            
+                        # send anything else to ircd through irc client
+                        else:
+                            if bnc != False:
+                                bnc.send(bytes(line, 'UTF-8'))
                                 
         for sock in sel_write:
             pass
