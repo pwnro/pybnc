@@ -1,16 +1,16 @@
 {
     "server": {
         "port": 1337,
-        "host": "localhost"
+        "host": "localhost",
+        "pass": "897b07f95239a764254d1f3d3a1d4f28"
     },
-    "bouncers": [
-        {
-            "id": "ionut",
-            "nick": "zzzzz",
-            "user": "pwnro",
-            "server": "irc.rizon.net",
-            "port": 6667,
-            "channels": ["#pwn.ro"]
-        }
-    ]
+    "bouncer": {
+        "id": "ionut",
+        "nick": "zzzzz",
+        "server": "irc.rizon.net",
+        "port": 6667,
+        "channels": ["#pwn.ro"],
+        "description": "sef pe zona",
+        "away_message": "sunt away acu ms."
+    }
 }
