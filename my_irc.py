@@ -1,94 +1,131 @@
 import sys, socket
-from pprint import pprint
-import string as str
-from random import randint
-import select
 
-class IrcClient(object):
-    sock = False
-    registered = False
-    client_connected = False
-    client_sockets = []
-    
-    def __init__(self, config):
-        print("starting bouncer..")
-        self.config = config
-        self.id = config['id']
-        #self.connect()
+class MyIrc(object):
+    @staticmethod
+    def send(sock, data):
+        bytes_sent = 0
         
-    def get_config(self):
-        return self.config
-    
-    def send_to_client_sockets(self, data):
-        # data a fost decodata din bytes, primeste str, pentru trimitere encodam inapoi in bytes
-        if self.client_sockets != []:
-            #payload = bytes(data + "\n", 'UTF-8')
-            
-            for client_socket in self.client_sockets:
-                try:
-                    #client_socket.send(payload)
-                    self.send_to_socket(data, client_socket)
-                except:
-                    print("could not send data read from ircd to client")
-                    # remove client_socket from list
-                    self.client_sockets.remove(client_socket)
-    
-    def send_to_socket(self, data, socket):
-        self.send(data, socket)
-    
-    def send(self, data, to_client = False):
         try:
             if type(data) is str:
                 pass
             elif type(data) is bytes:
                 data = data.decode('utf-8')
             
+            data = data.strip()
+            
             if len(data) > 0 and data[-1] != "\n":
-                print("**********")
-                print(data)
-                print("**********")                
-                
                 data = data + "\n"
                 
             data = data.encode('utf-8')
             
-            if to_client == False:
-                self.sock.send(data)
-            else:
-                to_client.send(data)
+            #print(">> %s" % data)
+            
+            bytes_sent = sock.send(data)
                 
         except Exception as e:
             print(repr(e))
             sys.exit("can't send()")
+            
+        return bytes_sent
     
-    def connect(self):
-        print("connecting to %s:%d" % (self.config['server'], self.config['port']))
+    @classmethod
+    def privmsg(irc, sock, dest, line):
+        return irc.send(sock, "PRIVMSG %s :%s" % (dest, line))
+    
+    @classmethod
+    def notice(irc, sock, dest, line):
+        return irc.send(sock, "NOTICE %s :%s" % (dest, line))
+    
+    @classmethod
+    def ctcpSend(irc, sock, dest, command, value = ''):
+        special_char = chr(1)
         
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.config['server'], self.config['port']))
-            
-            #self.sock.setblocking(False)
-            
-            self.config['peername'] = self.sock.getpeername()
-            
-            self.send("USER %s %s %s :pybnc" % (self.config['id'], '+iw', self.config['nick']))
-            self.send("NICK %s" % self.config['nick']) # here we actually assign the nick to the bot
-        except Exception as e:
-            print(repr(e))
-            sys.exit("can't connect to server..")
-            
-        print("connection ok..")
+        if value:
+            value = ' ' + value
         
-        #return self.sock
-        #self.select_loop()
+        payload = "%s%s%s%s" % (special_char, command, value, special_char)
+        
+        return irc.privmsg(sock, dest, payload)
+    
+    @classmethod
+    def ctcpReply(irc, sock, dest, command, value = ''):
+        special_char = chr(1)
+        
+        if value:
+            value = ' ' + value
+        
+        payload = "%s%s%s%s" % (special_char, command, value, special_char)
+        
+        return irc.notice(sock, dest, payload)    
                 
-    def disconnect(self):
-        if self.sock != False:
-            self.sock.close()
-                
+    @classmethod
+    def quit(irc, sock, message = False):
+        if message:
+            return irc.send(sock, "QUIT :%s" % message)    
+        else:
+            return irc.send(sock, "QUIT")
+        
+    @classmethod
+    def setAway(irc, sock, message):
+        return irc.send(sock, "AWAY :%s" % message)
+    
+    @classmethod
+    def removeAway(irc, sock):
+        return irc.send(sock, "AWAY")
+    
+    @classmethod
+    def info(irc, sock):
+        return irc.send(sock, "INFO")
+    
+    @classmethod
+    def info(irc, sock):
+        return irc.send(sock, "INFO")
+    
+    @classmethod
+    def invite(irc, sock, nick, channel):
+        return irc.send(sock, "INVITE %s %s" % (nick, channel))
+        
+    @classmethod
+    def join(irc, sock, channel, key = False):
+        if key:
+            return irc.send(sock, "JOIN %s :%s" % (channel, key))    
+        else:
+            return irc.send(sock, "JOIN %s" % channel)
+        
+    @classmethod
+    def kick(irc, sock, channel, nick, message = False):
+        if message:
+            return irc.send(sock, "KICK %s %s :%s" % (channel, nick, message))    
+        else:
+            return irc.send(sock, "KICK %s %s" % (channel, nick))    
+        
+    @classmethod
+    def mode(irc, sock, modes):
+        return irc.send(sock, "MODE %s" % modes)
+    
+    @classmethod
+    def names(irc, sock, channel):
+        return irc.send(sock, "NAMES %s" % channel)
+    
+    @classmethod
+    def nick(irc, sock, nick):
+        return irc.send(sock, "NICK %s" % nick)    
+
+    @classmethod        
+    def part(irc, sock, channel, message = False):
+        if message:
+            return irc.send(sock, "PART %s :%s" % (channel, message))
+        else:
+            return irc.send(sock, "PART %s" % channel)
+        
+    @classmethod
+    def topic(irc, sock, channel, topic = False):
+        if topic:
+            return irc.send(sock, "TOPIC %s :%s" % (channel, topic))
+        else:
+            return irc.send(sock, "TOPIC %s" % channel)
+  
     def parse(self, line):
-        #pprint("<< %s" % line)
         words = line.split(' ')
         words_len = len(words)
         
@@ -107,9 +144,6 @@ class IrcClient(object):
             
         if self.client_connected != False:
             self.send_to_client_sockets(line)
-            
-    def getNick(self):
-        return self.config['nick']
     
     def reply_to_code(self, code):
         if code == "433" and self.registered == False:
@@ -120,11 +154,42 @@ class IrcClient(object):
         if code == "001" and self.registered == False:
             # registed on the network
             self.registered = True
-                
-    def join_config_channels(self):        
-        # join channels
-        for channel in self.config['channels']:
-            self.send("JOIN %s" % channel)
-        
-            
 
+    # config is a dictionary with the following required keys: server, port, id, nick, description
+    @classmethod
+    def connect(irc, config):        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((config['server'], config['port']))
+        
+        #config['peername'] = sock.getpeername()
+        
+        if 'pass' in config:
+            sock.send("PASS %s" % config['pass'])
+        
+        #sock.send("USER %s %s %s :%s" % (config['id'], '+iw', config['nick'], config['description']))
+        #sock.send("NICK %s" % config['nick'])
+        
+        irc.send(sock, "USER %s %s %s :%s" % (config['id'], '+iw', config['nick'], config['description']))
+        irc.send(sock, "NICK %s" % config['nick'])        
+
+        return sock
+    
+    @classmethod
+    def recv(irc, sock):
+        lines = []
+        buff_len = 2048
+        
+        try: 
+            received = sock.recv(buff_len)                    
+        except:
+            return False
+        
+        lines = received.decode('utf-8').split("\n")
+        lines = list(map(lambda l: l.strip(), lines))
+        lines = list(filter(None, lines))
+        
+        #for line in lines:
+            #print("<< %s" % line)
+        
+        return lines
+    

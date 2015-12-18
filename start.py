@@ -1,17 +1,39 @@
 import sys, os, json
-from pprint import pprint
-from my_irc import IrcClient
-from bnc_server import BncServer
-from bnc_client import BncClient
-
 import select
-#import time, thread
+from hashlib import md5
+
+from my_irc import MyIrc as mirc
+import bnc
+
+
+def remove_socket(sock):
+    global is_readable, is_writable
+    
+    try:
+        is_readable.remove(sock)
+        is_writable.remove(sock)
+    except:
+        pass
+
+def add_socket(sock):
+    global is_readable, is_writable
+    
+    try:
+        is_readable.append(sock)
+        is_writable.append(sock)
+    except:
+        pass
+    
+def md5hash(plaintext):
+    m = md5()
+    
+    m.update(plaintext.encode('utf-8'))
+    
+    return m.hexdigest()
+
 
 if hasattr(os, 'geteuid') and os.getuid() == 0:
     sys.exit("can't run as root srry")
-
-#if sys.version_info < (3, 3):
-#    sys.exit("requires python 3.3 or later bra")
 
 try:
     with open('config.json') as cfg_file:
@@ -19,191 +41,111 @@ try:
 except:
     sys.exit("can't read config file config.json")
 
-bouncers = []
-bouncer_sockets = []
-bnc_clients = []
+if 'bouncer' not in cfg or 'server' not in cfg:
+    sys.exit("config file si fucked up bro")
 
-if 'bouncers' in cfg and len(cfg['bouncers']) > 0:
-    # start bouncer server - listen for connections and map them to the bncs
-    bcfgs = cfg['bouncers']
-    
-    for bcfg in bcfgs:
-        print("bouncer %s: %s @ %s:%d - %s" % \
-        ( bcfg['id'], bcfg['nick'], bcfg['server'], bcfg['port'], ', '.join(bcfg['channels']) ))
-        
-        # connect to irc server
-        b = IrcClient(bcfg)
-        b.connect()
-        
-        if b.sock != False:
-            print("bouncer %s connected, putting socket on the select() list" % bcfg['id'])
-            bouncers.append(b)
-            bouncer_sockets.append(b.sock)
-        else:
-            print("bouncer %s can not connect.." % bcfg['id'])
+# lists for select()
+is_readable = []
+is_writable = []
+is_error = []
+
+# fire up the bouncer
+bouncer = bnc.Conn(cfg['bouncer'])
+if bouncer.sock != False:
+    add_socket(bouncer.sock)
 else:
-    sys.exit("no bouncers found in config file")    
-    
-if len(bouncer_sockets) == 0:
-    sys.exit("no bouncer sockets could be created, existing..")
-    
-is_readable = list(bouncer_sockets)
-is_writable = list(bouncer_sockets)
-is_error = []    
-    
-# launch server
-server = False
-if 'server' in cfg:
-    server_cfg = cfg['server']
-    
-    server = BncServer(server_cfg)
-    
-    if server.sock != False:
-        is_readable.append(server.sock)
-        is_writable.append(server.sock)
-    else:
-        sys.exit("server can't start, shutting down..")
+    sys.exit("could not create bouncer socket")
+        
+server = bnc.Server(cfg['server'])
+if server.sock != False:
+    add_socket(server.sock)
+else:
+    sys.exit("server can't start, shutting down")
     
 # main select() loop
-while True :
+while True:
     try:
         sel_read, sel_write, sel_error = select.select(is_readable, is_writable, is_error)
         
         for sock in sel_error:
             # remove from lists
-            print("select() error detected")
-            try:
-                is_readable.remove(sock)
-                is_writable.remove(sock)
-            except:
-                pass
+            print("select() error detected, removing sock")
+            remove_socket(sock)
         
         for sock in sel_read:
-            # incoming message from ircd on one of the bouncers?
-            if sock in bouncer_sockets:
-                bouncer = False
-                for b in bouncers:
-                    if sock == b.sock:
-                        bouncer = b
-                        break
+            # incoming data from the ircd to the bouncer
+            if sock == bouncer.sock:
+                lines = mirc.recv(sock)
                 
-                if bouncer == False:
-                    print("could not find bouncer for socket, closing it..")
-                    sock.close()
-                    break
-                   
-                received = sock.recv(2048)
+                if not lines:
+                    print("bouncer disconnected from server")
+                    remove_socket(sock)
+                    continue
                 
-                bouncer_id = bouncer.config['id']
+                #print(lines)
                 
-                if not received:
-                    print(bouncer_id + ": disconnected from server")
-                    
-                    try:
-                        is_readable.remove(sock)
-                    except:
-                        pass
-                    
-                    sock.close()
-                    # ar trebui scoasa din is_readable, is_writable
-                else:
-                    # primim bytes -> decode in utf8
-                    lines = received.decode('utf-8')
-                    
-                    lines = lines.split("\n")
-                    lines = list(map(lambda l: l.strip(), lines))
-                    lines = filter(None, lines)
-                    
-                    for line in lines:
-                        #print(bouncer_id + ": " + line)
-                        bouncer.parse(line.strip()) # trimite automat de la ircd la clientul conectat la bnc
+                # feed the bouncer cu ce zice ircdu
+                for line in lines:
+                    # va trimite automat si catre clientul conectat la server, daca e conectat
+                    bouncer.parse(line)
                         
-                        
+            # conexiune noua pe server
             elif sock == server.sock:
-                # new connection on server socket
                 client, address = server.sock.accept()
                 print("server - new connection %d from %s" % (client.fileno(), address))
                 
-                # add client socket to sel_read and sel_write lists
-                is_readable.append(client)
-                is_writable.append(client)
+                # add client socket to select() loop
+                add_socket(client)
             
+            # de la unul din clientii conectati la server
             else:
-                # one of the bnc clients
-                received = sock.recv(2048)
+                lines = mirc.recv(sock)
                 
-                if not received:
-                    print("bnc client disconnected")
+                if not lines:
+                    print("client disconnected from server")
+                    bouncer.client_sockets.remove(sock)
+                    remove_socket(sock)
+                    continue
+                
+                # parsam ce trimite clientul                    
+                for line in lines:
+                    words = line.split(' ')
+                    words_len = len(words)
                     
-                    # remove from is_readable
-                    try:
-                        is_readable.remove(sock)
-                        is_writable.remove(sock)
-                    except:
-                        pass
-                    
-                    sock.close()
-                else:
-                    # cautam sa vede daca avem deja bouncer pentru aceasta conexiune, sau daca conectam la unul
-                    bnc = False
-                    for bnc1 in bouncers:
-                        if sock in bnc1.client_sockets:
-                            bnc = bnc1
-                            continue
-                    
-                    #lines = received.encode('utf-8').split("\n")
-                    lines = received.decode('utf-8').split("\n")
-                    
-                    for line in lines:
-                        print(line.strip())
-                        words = line.split(' ')
-                        words_len = len(words)
+                    # autentificare
+                    if sock not in bouncer.client_sockets:
+                        authentified = False
                         
-                        if words_len > 1 and words[0] == 'USER':
-                            client_id = words[1]
+                        if words_len > 1 and words[0] == 'PASS':
+                            password = words[1].strip()
                             
-                            for bnc in bouncers:
-                                if hasattr(bnc, 'id') and bnc.id == client_id:
-                                    print("client connected to bouncer %s" % client_id)
-                                    break
-                                else:
-                                    bnc = False
-                                    
-                            if bnc == False:
-                                print("no bouncer with id %s found for client" % client_id)
+                            if md5hash(password) == cfg['server']['pass']:
+                                authentified = True
+                                bouncer.client_sockets.append(sock)
                             else:
-                                # connect client to bouncer
-                                print("connecting client to bouncer")
-                                bnc.client_connected = True
-                                bnc.client_sockets.append(sock)
+                                mirc.send(sock, ":pyBNC 100 pyBNC :wrong password, disconnecting")
+                                # wrong password, disconnect user
+                                remove_socket(sock)
                                 
-                                # sending la misto errnoues nickname
-                                # sock.send(bytes(':irc.rizon.no 433 * zzzzz :Nickname is already in use.', 'UTF-8'))
-                                
-                                #sock.send(bytes(":pyBNC 001 * sal man experienta placuta ms\n", 'UTF-8'))
-                                #sock.send(bytes(":pyBNC 002 * te-ai conectat la pybnc versiunea 1.3.3.7\n", 'UTF-8'))
-                                
-                                bnc.send_to_socket(":pyBNC 001 %s :welcome to pyBNC" % bnc.getNick(), sock)
-                                bnc.send_to_socket(":pyBNC 002 %s :running pyBNC version 1.3.37" % bnc.getNick(), sock)
-                                
-                                #bnc.join_config_channels()
+                        elif words_len > 1 and words[0] == 'USER':
+                                mirc.send(sock, ":pyBNC 100 pyBNC :auth required, disconnecting")
+                                # no password, disconnect user
+                                remove_socket(sock)                            
+                    else:
+                        authentified = True                    
+
+                        if words_len > 1 and words[0] == 'USER':
+                            # send motd / greet, join channels
+                            bouncer.setup_user(sock)
                                 
                         # intercept QUIT command from client
                         elif words_len > 0 and words[0] == 'QUIT':
                             print("bnc client disconnected, intercepting QUIT")
-                            
-                            try:
-                                is_readable.remove(sock)
-                                is_writable.remove(sock)
-                            except:
-                                pass                            
-                            
-                            sock.close()
-                            
+                            remove_socket(sock)
+                                
                         # send anything else to ircd through irc client
                         else:
-                            if bnc != False:
-                                bnc.send(bytes(line, 'UTF-8'))
+                            mirc.send(bouncer.sock, line)
                                 
         for sock in sel_write:
             pass
@@ -211,8 +153,7 @@ while True :
     except KeyboardInterrupt:
         print('got interrupt, closing sockets')
         
-        for sock in bouncer_sockets:
+        for sock in is_readable:
             sock.close()
         break    
         
-    
