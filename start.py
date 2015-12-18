@@ -1,159 +1,40 @@
-import sys, os, json
-import select
-from hashlib import md5
+#!/usr/bin/python3
 
-from my_irc import MyIrc as mirc
+import sys
+import os
+import argparse
+
 import bnc
 
-
-def remove_socket(sock):
-    global is_readable, is_writable
-    
-    try:
-        is_readable.remove(sock)
-        is_writable.remove(sock)
-    except:
-        pass
-
-def add_socket(sock):
-    global is_readable, is_writable
-    
-    try:
-        is_readable.append(sock)
-        is_writable.append(sock)
-    except:
-        pass
-    
-def md5hash(plaintext):
-    m = md5()
-    
-    m.update(plaintext.encode('utf-8'))
-    
-    return m.hexdigest()
-
-
 if hasattr(os, 'geteuid') and os.getuid() == 0:
-    sys.exit("can't run as root srry")
+    sys.exit("pyBNC can't run as root mate")
 
-try:
-    with open('config.json') as cfg_file:
-        cfg = json.load(cfg_file)
-except:
-    sys.exit("can't read config file config.json")
-
-if 'bouncer' not in cfg or 'server' not in cfg:
-    sys.exit("config file si fucked up bro")
-
-# lists for select()
-is_readable = []
-is_writable = []
-is_error = []
-
-# fire up the bouncer
-bouncer = bnc.Conn(cfg['bouncer'])
-if bouncer.sock != False:
-    add_socket(bouncer.sock)
-else:
-    sys.exit("could not create bouncer socket")
-        
-server = bnc.Server(cfg['server'])
-if server.sock != False:
-    add_socket(server.sock)
-else:
-    sys.exit("server can't start, shutting down")
+parser = argparse.ArgumentParser(description = "pyBNC IRC bouncer - for all your pythonic IRC needs.")
+parser.add_argument("config_file", metavar = "<config-file>", help = "json config file", nargs="?")
+parser.add_argument("-d", "--debug", help = "run in debug mode, don't fork(), log everything to stdout / stderr", action = "store_true")
+parser.add_argument("-o", "--output", metavar = "output.log", help = "log file to write to, default is pybnc.log", default = "pybnc.log")
+parser.add_argument("-p", "--pidfile", metavar = "pidfile.pid", help = "file to write pid to, default is pybnc.pid", default = "pybnc.pid")
+args = parser.parse_args()
     
-# main select() loop
-while True:
-    try:
-        sel_read, sel_write, sel_error = select.select(is_readable, is_writable, is_error)
-        
-        for sock in sel_error:
-            # remove from lists
-            print("select() error detected, removing sock")
-            remove_socket(sock)
-        
-        for sock in sel_read:
-            # incoming data from the ircd to the bouncer
-            if sock == bouncer.sock:
-                lines = mirc.recv(sock)
-                
-                if not lines:
-                    print("bouncer disconnected from server")
-                    remove_socket(sock)
-                    continue
-                
-                #print(lines)
-                
-                # feed the bouncer cu ce zice ircdu
-                for line in lines:
-                    # va trimite automat si catre clientul conectat la server, daca e conectat
-                    bouncer.parse(line)
-                        
-            # conexiune noua pe server
-            elif sock == server.sock:
-                client, address = server.sock.accept()
-                print("server - new connection %d from %s" % (client.fileno(), address))
-                
-                # add client socket to select() loop
-                add_socket(client)
-            
-            # de la unul din clientii conectati la server
-            else:
-                lines = mirc.recv(sock)
-                
-                if not lines:
-                    print("client disconnected from server")
-                    bouncer.client_sockets.remove(sock)
-                    remove_socket(sock)
-                    continue
-                
-                # parsam ce trimite clientul                    
-                for line in lines:
-                    words = line.split(' ')
-                    words_len = len(words)
-                    
-                    # autentificare
-                    if sock not in bouncer.client_sockets:
-                        authentified = False
-                        
-                        if words_len > 1 and words[0] == 'PASS':
-                            password = words[1].strip()
-                            
-                            if md5hash(password) == cfg['server']['pass']:
-                                authentified = True
-                                bouncer.client_sockets.append(sock)
-                            else:
-                                mirc.send(sock, ":pyBNC 100 pyBNC :wrong password, disconnecting")
-                                # wrong password, disconnect user
-                                remove_socket(sock)
-                                
-                        elif words_len > 1 and words[0] == 'USER':
-                                mirc.send(sock, ":pyBNC 100 pyBNC :auth required, disconnecting")
-                                # no password, disconnect user
-                                remove_socket(sock)                            
-                    else:
-                        authentified = True                    
+if args.config_file:
+    config_file = args.config_file
+else:
+    # default json config file
+    config_file = "config.json"
 
-                        if words_len > 1 and words[0] == 'USER':
-                            # send motd / greet, join channels
-                            bouncer.setup_user(sock)
-                                
-                        # intercept QUIT command from client
-                        elif words_len > 0 and words[0] == 'QUIT':
-                            print("bnc client disconnected, intercepting QUIT")
-                            remove_socket(sock)
-                                
-                        # send anything else to ircd through irc client
-                        else:
-                            mirc.send(bouncer.sock, line)
-                                
-        for sock in sel_write:
-            pass
-            
-    except KeyboardInterrupt:
-        print('got interrupt, closing sockets')
-        
-        for sock in is_readable:
-            sock.close()
-        break    
-        
+# don't fork if we're in debug mode
+if args.debug:
+    child = 0
+else:
+    child = os.fork()
+
+if child == 0:
+    bnc.run(config_file, debug = args.debug, log_to = args.output)
+else:
+    # write PID to pidfile
+    try:
+        f = open(args.pidfile, 'w')
+        f.write("%s" % child)
+    except:
+        sys.stderr.write("can't write PID to %s" % args.pidfile)
+    

@@ -1,4 +1,6 @@
-import sys, socket
+import sys
+import socket
+import logging
 
 class MyIrc(object):
     @staticmethod
@@ -18,13 +20,11 @@ class MyIrc(object):
                 
             data = data.encode('utf-8')
             
-            #print(">> %s" % data)
-            
             bytes_sent = sock.send(data)
                 
         except Exception as e:
-            print(repr(e))
-            sys.exit("can't send()")
+            logging.error("my_irc: can't send()")
+            logging.error(repr(e))
             
         return bytes_sent
     
@@ -184,12 +184,14 @@ class MyIrc(object):
         except:
             return False
         
-        lines = received.decode('utf-8').split("\n")
+        try:
+            lines = received.decode('utf-8').split("\n")
+        except:
+            lines = received
+            
         lines = list(map(lambda l: l.strip(), lines))
         lines = list(filter(None, lines))
         
-        #for line in lines:
-            #print("<< %s" % line)
-        
         return lines
+    
     
