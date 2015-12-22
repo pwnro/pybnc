@@ -5,6 +5,7 @@ import signal
 import select
 import json
 import logging
+import time
 
 from hashlib import md5
 from random import randint
@@ -22,10 +23,17 @@ class Conn(object):
     port = 0
     sock = False
     
+    # has the bouncer succesfully registered on the ircd?
     registered = False
 
     cfg = {}    
     client_sockets = []
+    
+    # if the bouncer should retry to connect to server all the time
+    auto_connect = True
+    
+    # delay for retrying to connect to server, in seconds
+    auto_connect_delay = 5
     
     real_server_name = ''
     nick = ''
@@ -40,13 +48,13 @@ class Conn(object):
         self.real_server_name = cfg['server']
         self.nick = cfg['nick']
         
-        logging.info("starting bouncer %s - %s @ %s" % (self.cfg['id'], self.cfg['nick'], self.cfg['server']))
+        logging.info("starting bouncer %s - %s @ %s" % (self.cfg['user'], self.cfg['nick'], self.cfg['server']))
         logging.debug(repr(self.cfg))
         
         self.sock = mirc.connect(self.cfg)
         
         if self.userhost == '':
-            self.userhost = cfg['nick'] + '!~' + cfg['id'] + self.sock.getsockname()[0]
+            self.userhost = cfg['nick'] + '!~' + cfg['user'] + self.sock.getsockname()[0]
 
         signal.signal(signal.SIGINT, self.sighandler)
         
@@ -112,13 +120,26 @@ class Conn(object):
         mirc.send(client, ":pyBNC 001 %s :welcome to pyBNC" % self.nick)
         mirc.send(client, ":pyBNC 002 %s :running pyBNC version 1.3.37" % self.nick)
         
+        if self.registered:
+            mirc.send(client, ": bouncer connected to %s:%d (%s)" % (self.cfg['server'], self.cfg['port'], self.real_server_name))
+        else:
+            mirc.send(client, ": bouncer is disconnected")
+            mirc.send(client, ": bouncer configured for %s:%d (%s)" % (self.cfg['server'], self.cfg['port'], self.real_server_name))
+            
+            if self.auto_connect:
+                mirc.send(client, ": auto reconnect enabled")
+            else:
+                mirc.send(client, ": auto reconnect disabled")
+                
+            mirc.send(client, ": type /bhelp for list of pyBNC commands")
+        
         for channel in self.cfg['channels']:
             mirc.join(self.sock, channel)
             
             # emulate joining the channel in case we're already on the channel
             mirc.send(client, ':%s JOIN %s' % (self.userhost, channel))
-            
             mirc.names(self.sock, channel)
+            mirc.topic(self.sock, channel)
         
     # commands to run after the bouncer has connected to the irc network    
     def after_register(self):
@@ -156,6 +177,22 @@ class Server(object):
         # close the server
         logging.info('received kb interrupt, shutting down server')
         self.sock.close()
+        
+def send_pybnc_help(sock):
+    help_dict = {
+        'BQUIT <msg>': "disconnect bouncer from irc (with <msg>), turn auto-connect off",
+        'BHELP': "see pyBNC commands and descriptions",
+        'BSHUTDOWN': "shut down irc bouncer",
+        'BCONFIG': "get pyBNC config",
+        'BSET <key> <value>': "set config option <key> to <value>",
+        'BAWAY <msg>': "set <msg> as away message - set on disconnecting from bouncer",
+        'BAUTOCONNECT [1/0]': "set autoconnect on or off",
+        'BCONNECT': "connect to ircd (only if not connected)",
+        'BRECONNECT': "reconnect to ircd server"
+    }
+    
+    for help_item, help_desc in help_dict.iteritems():
+        mirc.send(sock, ": %s => %s" % (help_item, help_desc))
         
 def remove_socket(sock):
     global is_readable, is_writable
@@ -205,24 +242,39 @@ def run(infile, debug = False, log_to = 'pybnc.log'):
     if 'bouncer' not in cfg or 'server' not in cfg:
         logging.critical("invalid config file '%s'" % infile)
         sys.exit(1)
-    
-    # fire up the bouncer
-    bouncer = Conn(cfg['bouncer'])
-    if bouncer.sock != False:
-        add_socket(bouncer.sock)
-    else:
-        logging.critical("could not create bouncer socket")
-        sys.exit(1)
-            
+
     server = Server(cfg['server'])
     if server.sock != False:
         add_socket(server.sock)
     else:
         logging.critical("server can't start, shutting down")
         sys.exit(1)
-        
+    
+    bouncer = False
+    def bouncer_try():
+        # fire up the bouncer
+        bouncer = Conn(cfg['bouncer'])
+        if bouncer.sock != False:
+            add_socket(bouncer.sock)
+        else:
+            logging.critical("could not create bouncer socket")
+            sys.exit(1)
+            
+        return bouncer
+    
+    bouncer = bouncer_try()
+    
     # main select() loop
     while True:
+        if hasattr(bouncer, 'registered') and bouncer.registered == False:
+            # bouncer couldn't register to network
+            # if auto_connect is enabled, wait for auto_connect_delay and try again
+            if bouncer.auto_connect:
+                time.sleep(bouncer.auto_connect_delay)
+                bouncer = bouncer_try()
+            else:
+                logging.info("bouncer could not connect / register, auto_connect is disabled")
+        
         try:
             sel_read, sel_write, sel_error = select.select(is_readable, is_writable, is_error)
             
@@ -245,6 +297,8 @@ def run(infile, debug = False, log_to = 'pybnc.log'):
                     for line in lines:
                         # va trimite automat si catre clientul conectat la server, daca e conectat
                         logging.debug(line)
+                        
+                        hooks.received_from_ircd(line)
                         bouncer.parse(line)
                             
                 # conexiune noua pe server
@@ -304,6 +358,9 @@ def run(infile, debug = False, log_to = 'pybnc.log'):
                             elif words_len > 0 and words[0] == 'QUIT':
                                 logging.info("client disconnected, intercepting QUIT")
                                 remove_socket(sock)
+                                
+                            elif words_len > 0 and words[0].upper() == "BHELP":
+                                send_pybnc_help(sock)
                                     
                             # send anything else to ircd through irc client
                             else:

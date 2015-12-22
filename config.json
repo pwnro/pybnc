@@ -5,12 +5,29 @@
         "pass": "897b07f95239a764254d1f3d3a1d4f28"
     },
     "bouncer": {
-        "id": "ionut",
+        "user": "ionut",
         "nick": "zzzzz",
         "server": "irc.rizon.net",
         "port": 6667,
         "channels": ["#pwn.ro"],
         "description": "sef pe zona",
         "away_message": "sunt away acu ms."
-    }
+    },
+    "plugins": [
+        {
+            "name": "raw-file-logs",
+            "dir": "raw_logs",
+            "enabled": 0
+        },
+        {
+            "name": "json-file-logs",
+            "dir": "json_logs",
+            "enabled": 0
+        },
+        {
+            "name": "json-elastic",
+            "index": "pybnc-logs",
+            "enabled": 0
+        }
+    ]
 }

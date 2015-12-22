@@ -169,7 +169,7 @@ class MyIrc(object):
         #sock.send("USER %s %s %s :%s" % (config['id'], '+iw', config['nick'], config['description']))
         #sock.send("NICK %s" % config['nick'])
         
-        irc.send(sock, "USER %s %s %s :%s" % (config['id'], '+iw', config['nick'], config['description']))
+        irc.send(sock, "USER %s %s %s :%s" % (config['user'], '+iw', config['nick'], config['description']))
         irc.send(sock, "NICK %s" % config['nick'])        
 
         return sock

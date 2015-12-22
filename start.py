@@ -14,6 +14,7 @@ parser.add_argument("config_file", metavar = "<config-file>", help = "json confi
 parser.add_argument("-d", "--debug", help = "run in debug mode, don't fork(), log everything to stdout / stderr", action = "store_true")
 parser.add_argument("-o", "--output", metavar = "output.log", help = "log file to write to, default is pybnc.log", default = "pybnc.log")
 parser.add_argument("-p", "--pidfile", metavar = "pidfile.pid", help = "file to write pid to, default is pybnc.pid", default = "pybnc.pid")
+
 args = parser.parse_args()
     
 if args.config_file:
@@ -37,4 +38,4 @@ else:
         f.write("%s" % child)
     except:
         sys.stderr.write("can't write PID to %s" % args.pidfile)
-    
+
